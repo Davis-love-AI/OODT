@@ -1,0 +1,49 @@
+MODEL:
+  PIXEL_MEAN: [103.06, 115.90, 123.15]
+  META_ARCHITECTURE: "IENet"
+  BACKBONE:
+    NAME: "build_retinanet_resnet_fpn_backbone"
+  FPN:
+    IN_FEATURES: ["res3", "res4", "res5"]
+  RESNETS:
+    OUT_FEATURES: ["res3", "res4", "res5"]
+  AVOD:
+    HEAD_NAME: "AVODWH_CENTER"
+    NUM_CONVS: 4
+    # normalizing the regression targets with FPN strides
+    NORM_REG_TARGETS: True
+    # positioning centerness on the regress branch.
+    # Please refer to https://github.com/tianzhi0549/FCOS/issues/89#issuecomment-516877042
+    CENTERNESS_ON_REG: True
+    # using center sampling and GIoU.
+    # Please refer to https://github.com/yqyao/FCOS_PLUS
+    CENTER_SAMPLING_RADIUS: 1.5
+    IOU_LOSS_TYPE: "giou"
+    # we only use dcn in the last layer of towers
+    USE_DCN_IN_TOWER: False
+    INDEPENDENT_BRANCH: True
+    PRE_NMS_TOP_N: 1000
+    IN_FEATURES: ["p3", "p4", "p5", "p6", "p7"]
+DATASETS:
+  TRAIN: ("dota_val_mini_800",)
+  TEST: ("dota_val_mini_800",)
+SOLVER:
+  IMS_PER_BATCH: 16
+  BASE_LR: 0.02
+  STEPS: (110000, 130000, 150000)
+  MAX_ITER: 150000
+INPUT:
+  FORMAT: "RGB"
+  MIN_SIZE_TRAIN: (800,)
+  MAX_SIZE_TRAIN: 800
+  MIN_SIZE_TEST: 800
+  MAX_SIZE_TEST: 800
+DATALOADER:
+  NUM_WORKERS: 8
+TEST:
+  AUG:
+    MIN_SIZES: (800,)
+    MAX_SIZE: 800
+  EVAL_PERIOD: 100
+  DETECTIONS_PER_IMAGE: 2000
+OUTPUT_DIR: "/home/omnisky/Pengming_workspace/disk_2T/DOTA/training/ienet/avod_center"
