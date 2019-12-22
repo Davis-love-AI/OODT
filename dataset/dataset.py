@@ -9,7 +9,6 @@ import itertools
 from detectron2.structures import BoxMode
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from .dataset_tool import preprocess_annotation
-
 #__all__ = ["register_pascal_voc"]
 
 
@@ -78,6 +77,7 @@ def load_dota_instances(dirname: str, split: str):
             instances.append(
                 {"category_id": CLASS_NAMES.index(cls), "boxes": poly}
             )
+        
         r["annotations"] = instances
         dicts.append(r)
     return dicts
@@ -94,11 +94,15 @@ def register_all_dota_voc(root="datasets"):
 #        ("dota_train_1024", "train"),
 #        ("dota_val_1024", "val"),
 #        ("dota_test_1024", "test"),
-        ("dota_test_800", "DOTA_800", "test"),
-        ("dota_val_800", "DOTA_800", "val"),
-        ("dota_val_mini_800", "DOTA_800", "val_mini"),
-        ("dota_train_800", "DOTA_800", "train"),
+        ("dota_test_800", "DOTA_800_0_5_500", "test"),
+        ("dota_test", "./", "test"),
+        ("dota_test_800_200", "DOTA_800_200", "test"),
+        # ("dota_val_800_aug", "DOTA_800_0_5_500", "val"),
+        ("dota_val_mini_800", "DOTA_800_0_5_500", "val_mini"),
+        # ("dota_train_800_aug", "DOTA_800_0_5_500", "train"),
+        ("dota_train_800", "DOTA_800_200", "train"),
+        ("dota_val_800", "DOTA_800_200", "val"),
     ]
     for name, size, split in SPLITS:
         register_dota_voc(name, os.path.join(root.format(size), split), split)
-        MetadataCatalog.get(name).evaluator_type = "rot"
+        MetadataCatalog.get(name).evaluator_type = "hw"

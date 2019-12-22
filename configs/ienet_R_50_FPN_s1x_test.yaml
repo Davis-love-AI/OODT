@@ -1,0 +1,11 @@
+_BASE_: "Base-IENet-retina_p6p7.yaml"
+MODEL:
+  WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl"
+  RESNETS:
+    DEPTH: 50
+  MASK_ON: False
+SOLVER:
+  STEPS: (60000, 80000)
+  MAX_ITER: 90000
+TEST:
+  EVAL_PERIOD: 1000

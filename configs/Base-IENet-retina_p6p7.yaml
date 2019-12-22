@@ -1,5 +1,4 @@
 MODEL:
-  PIXEL_MEAN: [103.06, 115.90, 123.15]
   META_ARCHITECTURE: "IENet"
   BACKBONE:
     NAME: "build_retinanet_resnet_fpn_backbone"
@@ -21,29 +20,30 @@ MODEL:
     IOU_LOSS_TYPE: "giou"
     # we only use dcn in the last layer of towers
     USE_DCN_IN_TOWER: False
-    INDEPENDENT_BRANCH: True
-    PRE_NMS_TOP_N: 1000
+    INDEPENDENT_BRANCH: False
+    ATTENTION_ON: False
+    PRE_NMS_TOP_N: 3000
     IN_FEATURES: ["p3", "p4", "p5", "p6", "p7"]
 DATASETS:
-  TRAIN: ("dota_val_mini_800",)
+  TRAIN: ("dota_train_800", "dota_val_800",)
   TEST: ("dota_val_mini_800",)
 SOLVER:
   IMS_PER_BATCH: 16
-  BASE_LR: 0.02
+  BASE_LR: 0.01
   STEPS: (110000, 130000, 150000)
   MAX_ITER: 150000
 INPUT:
-  FORMAT: "RGB"
   MIN_SIZE_TRAIN: (800,)
   MAX_SIZE_TRAIN: 800
   MIN_SIZE_TEST: 800
   MAX_SIZE_TEST: 800
 DATALOADER:
-  NUM_WORKERS: 8
+  FILTER_EMPTY_ANNOTATIONS: False
+  NUM_WORKERS: 16
+  ASPECT_RATIO_GROUPING: False
 TEST:
   AUG:
     MIN_SIZES: (800,)
     MAX_SIZE: 800
-  EVAL_PERIOD: 100
+  EVAL_PERIOD: 5000
   DETECTIONS_PER_IMAGE: 2000
-OUTPUT_DIR: "/home/omnisky/Pengming_workspace/disk_2T/DOTA/training/ienet/avod_center"

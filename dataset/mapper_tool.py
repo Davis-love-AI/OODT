@@ -10,8 +10,9 @@ from detectron2.structures import (
     PolygonMasks,
     RotatedBoxes,
 )
-from .dataset_tool import polygonToRotRectangle
+from .dataset_tool import polygonToRotRectangle, get_best_begin_point
 import cv2 as cv
+import random
 
 
 from fvcore.common.file_io import PathManager
@@ -101,9 +102,54 @@ def read_image(file_name, format=None, rota=0):
         if format == "L":
             image = np.expand_dims(image, -1)
         return image
+    
+def normTo90(rotate):
+    theta = float(rotate[4])
+    if theta > 90.0:
+        theta -= 180
+    elif theta < -90.0:
+        theta += 180
+        
+    if theta == 90.0:
+        theta = -90
+    rotate[4] = theta
+    return rotate
 
+def convRotaToPolyAndHbb(rotate):
+    rotate = normTo90(rotate)
+    theta = float(-rotate[4])
+    obb_bndbox = ((rotate[0], rotate[1]),
+               (rotate[2], rotate[3]),
+               theta)
+    hbb_box = cv.boxPoints(obb_bndbox)
+    hbb_box = np.int0(hbb_box)
+    
+    pt_x_y_min = hbb_box.min(axis= 0)
+    pt_x_y_max = hbb_box.max(axis= 0)
+    
+    hrbb_box = np.hstack((pt_x_y_min, pt_x_y_max))
+    
+    hrbb_center = [(hrbb_box[0] + hrbb_box[2]) / 2,
+                   (hrbb_box[1] + hrbb_box[3]) / 2]
+    
+    if theta < 0:
+        pt_h = hbb_box[1][1] - hrbb_box[1]
+        pt_w = hbb_box[2][0] - hrbb_box[0] 
+    else:
+        pt_h = hbb_box[0][1] - hrbb_box[1]
+        pt_w = hbb_box[1][0] - hrbb_box[0]
+    
+    pt_inbox = [hrbb_center[0] - (pt_w / 2), 
+                hrbb_center[1] - (pt_h / 2), 
+                pt_w, pt_h]
+    
+    hbb_box = get_best_begin_point(hbb_box.reshape(-1, 2))
+    polygons = [np.asarray(hbb_box).reshape(-1, 2)]
+    polygons = [p.reshape(-1) for p in polygons]
+    
+    return hrbb_box, pt_inbox, polygons
 
-def transform_dota_instance_annotations(annotation, transforms, image_size, rota):
+def transform_dota_instance_annotations(annotation, image_size, rota):
     
     """
     Apply transforms to box, segmentation and keypoints of annotations of a single instance.
@@ -126,7 +172,7 @@ def transform_dota_instance_annotations(annotation, transforms, image_size, rota
             The "bbox_mode" field will be set to XYXY_ABS.
     """
     
-    poly = annotation["boxes"]
+    poly = np.array(annotation["boxes"])
     poly = poly.reshape(4, 2)
     image_size_half = np.array(image_size) / 2
     if rota != 0:
@@ -137,69 +183,23 @@ def transform_dota_instance_annotations(annotation, transforms, image_size, rota
         
         poly = np.array(ro)
     
-    OBB_box = polygonToRotRectangle(poly.reshape(-1))
+    OBB_box = polygonToRotRectangle(poly.reshape(-1).astype(np.int64))
+
             
     theta = float(OBB_box[4])
     
     theta = math.degrees(theta)
-#            theta = theta + rota
-    
-    if theta > 90.0:
-        theta -= 180
-    elif theta < -90.0:
-        theta += 180
-    
-    if theta == -90:
-        theta = 90
-        
-    obb_bndbox = ((OBB_box[0], OBB_box[1]),
-               (OBB_box[2], OBB_box[3]),
-               theta)
-    hbb_box = cv.boxPoints(obb_bndbox)
-    hbb_box = np.int0(hbb_box)
-    
-    pt_x_y_min = hbb_box.min(axis= 0)
-    pt_x_y_max = hbb_box.max(axis= 0)
-    
-    hrbb_box = np.hstack((pt_x_y_min, pt_x_y_max))
-    
-    
-    
-    hrbb_center = [(hrbb_box[0] + hrbb_box[2]) / 2,
-                   (hrbb_box[1] + hrbb_box[3]) / 2]
-    
 
-    if theta < 0:
-        pt_h = hbb_box[1][1] - hrbb_box[1]
-        pt_w = hbb_box[2][0] - hrbb_box[0] 
-    else:
-        pt_h = hbb_box[0][1] - hrbb_box[1]
-        pt_w = hbb_box[1][0] - hrbb_box[0]
-    
-    pt_inbox = [hrbb_center[0] - (pt_w / 2), 
-                hrbb_center[1] - (pt_h / 2), 
-                pt_w, pt_h]
-    
-    
-    pt_inbox = BoxMode.convert(pt_inbox, BoxMode.XYWH_ABS, BoxMode.XYXY_ABS)
-    # Note that bbox is 1d (per-instance bounding box)
-    annotation["pt_inbox"] = transforms.apply_box([pt_inbox])[0]
-    
-#    pt_hbb = BoxMode.convert(annotation["pt_hbb"], BoxMode.XYWH_ABS, BoxMode.XYXY_ABS)
-    # Note that bbox is 1d (per-instance bounding box)
-    pt_hbb = hrbb_box
-    annotation["pt_hbb"] = transforms.apply_box([pt_hbb])[0]
+    theta = -theta    
+ 
     
     obb_box = [
             OBB_box[0], OBB_box[1],
             OBB_box[2], OBB_box[3],
             theta
         ]
-    annotation["obb_boxes"] = transforms.apply_rotated_box(np.array([obb_box]))[0]
-    
-    polygons = [np.asarray(hbb_box).reshape(-1, 2)]
-    annotation["poly"] = [p.reshape(-1) for p in transforms.apply_polygons(polygons)]
-    
+    annotation["boxes"] = obb_box
+       
     return annotation
 
 
@@ -222,27 +222,42 @@ def dota_annotations_to_instances(annos, image_size):
     
     target = Instances(image_size)
     
-    pt_inbox = [obj["pt_inbox"] for obj in annos]
-    pt_inbox_boxes = target.gt_pt_inbox_boxes = Boxes(pt_inbox)
-    pt_inbox_boxes.clip(image_size)
+    obb_boxes = [obj["boxes"] for obj in annos]
+    obb_boxes = target.gt_boxes = RotatedBoxes(obb_boxes)
+    # obb_boxes.clip(image_size)
     
-    pt_hbb = [obj["pt_hbb"] for obj in annos]
-    pt_hbb_boxes = target.gt_pt_hbb_boxes = Boxes(pt_hbb)
-    pt_hbb_boxes.clip(image_size)
+    pt_hbb, pt_inbox, polygons = [], [], []
     
-    obb_boxes = [obj["obb_boxes"] for obj in annos]
-    obb_boxes = target.gt_obb_boxes = RotatedBoxes(obb_boxes)
-    obb_boxes.clip(image_size)
+    rotate_boxes = obb_boxes.tensor.numpy()
+    data = [
+        convRotaToPolyAndHbb(rotate_box) for rotate_box in rotate_boxes
+    ]
+    for d in data:
+        pt_hbb.append(d[0])
+        pt_inbox.append(d[1])
+        polygons.append(d[2])
     
-
+    pt_inbox = torch.as_tensor(pt_inbox).to(dtype=torch.float)
+    target.gt_pt_inbox_boxes = Boxes(pt_inbox)
+    
+    pt_hbb = torch.as_tensor(pt_hbb).to(dtype=torch.float)
+    target.gt_pt_hbb_boxes = Boxes(pt_hbb)
+    
+    # for sigmoid_focal_loss_jit the category id should start with 0
+    # for SigmoidFocalLoss in layers the category id should start with 1
     classes = [obj["category_id"] + 1 for obj in annos]
     classes = torch.tensor(classes, dtype=torch.int64)
     target.gt_classes = classes
 
-    if len(annos) and "poly" in annos[0]:
-        polygons = [obj["poly"] for obj in annos]
-        masks = PolygonMasks(polygons)
-        target.gt_masks = masks
 
-
+    masks = PolygonMasks(polygons)
+    masks_areas = target.gt_pt_hbb_boxes.area()
+    masks = torch.as_tensor(masks.polygons).to(dtype=torch.float)
+    target.gt_poly = masks.view(-1, 8)
+    target.gt_areas = masks_areas.to(dtype=torch.float)
+    
+    if len(target) > 3000:
+        mask = random.sample(list(range(0, len(target))), 3000)
+        target = target[mask]
+        
     return target

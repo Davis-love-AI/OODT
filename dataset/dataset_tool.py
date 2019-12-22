@@ -5,7 +5,7 @@ import sys
 import numpy as np
 import torch
 import torchgeometry as tgm
-
+from DOTA_devkit.poly_nms_gpu.nms_wrapper import poly_nms_gpu
 
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
@@ -33,7 +33,32 @@ CLASSES = (
   
 class_to_ind = dict(zip(CLASSES, range(len(CLASSES))))
 
+def boxlist_nms_poly(boxlist, score, nms_thresh, max_proposals=-1):
+    """
+    Performs non-maximum suppression on a boxlist, with scores specified
+    in a boxlist field via score_field.
 
+    Arguments:
+        boxlist(BoxList)
+        nms_thresh (float)
+        max_proposals (int): if > 0, then only the top max_proposals are kept
+            after non-maximum suppression
+        score_field (str)
+    """
+    if nms_thresh <= 0:
+        return boxlist
+
+    boxes = boxlist.cpu().numpy()
+    score = score.cpu().numpy()
+#    if boxes.shape[0] == 0:
+#        return boxlist
+    det = np.append(boxes, score[:, None], axis=1).astype(np.float32)
+#    keep = _box_nms(boxes, score, nms_thresh)
+    keep = poly_nms_gpu(det, np.float(nms_thresh))
+    if max_proposals > 0:
+        keep = keep[: max_proposals]
+    
+    return keep
 
 def polygonToRotRectangle(bbox):
     """
@@ -88,13 +113,8 @@ def batch_polygonToRotRectangle(bbox):
 
     normalized = torch.matmul(R.transpose(2,1), bbox - center)
     
-    if len(normalized) == 0:
-        empty = torch.zeros(
-                bbox.size(0), 5,  # keep the size, even this is a none tensor
-                dtype=normalized.dtype, 
-                device=normalized.device
-            )
-        return empty[empty > 0]
+    if bbox.size(0) == 0:
+        return torch.empty((0, 5), dtype=bbox.dtype, device=bbox.device)
 
     xmin = torch.min(normalized[:, 0,:], dim=1)[0]
     xmax = torch.max(normalized[:, 0,:], dim=1)[0]
@@ -107,7 +127,7 @@ def batch_polygonToRotRectangle(bbox):
     center = center.squeeze(-1)
     center_x = center[:, 0]
     center_y = center[:, 1]
-    new_box = torch.stack([center_x, center_y, w, h, tgm.rad2deg(angle)], dim=1)
+    new_box = torch.stack([center_x, center_y, w, h, -tgm.rad2deg(angle)], dim=1)
     return new_box
  
 def batch_hbb_hw2poly(proposal_xy, proposal_wh, hw, dtype='np'):
@@ -188,6 +208,75 @@ def get_best_begin_point(coordinate):
 #    if force_flag != 0:
 #        print("choose one direction!")
     return  combinate[force_flag]
+
+def batch_cal_line_length(point1, point2):
+    math1 = torch.pow(point1[:, 0] - point2[:, 0], 2)
+    math2 = torch.pow(point1[:, 1] - point2[:, 1], 2)
+    return torch.sqrt(math1 + math2)
+ 
+
+def batch_get_best_begin_point(coordinate):
+    x1 = coordinate[:, 0]
+    y1 = coordinate[:, 1]
+    x2 = coordinate[:, 2]
+    y2 = coordinate[:, 3]
+    x3 = coordinate[:, 4]
+    y3 = coordinate[:, 5]
+    x4 = coordinate[:, 6]
+    y4 = coordinate[:, 7]
+    xmin = torch.min(torch.stack([x1, x2, x3, x4], dim=1), dim=1)[0]
+    ymin = torch.min(torch.stack([y1, y2, y3, y4], dim=1), dim=1)[0]
+    xmax = torch.max(torch.stack([x1, x2, x3, x4], dim=1), dim=1)[0]
+    ymax = torch.max(torch.stack([y1, y2, y3, y4], dim=1), dim=1)[0]
+    combinate = torch.stack([torch.stack([torch.stack([x1, y1], dim=1), 
+                                          torch.stack([x2, y2], dim=1), 
+                                          torch.stack([x3, y3], dim=1), 
+                                          torch.stack([x4, y4], dim=1)], dim=1), 
+                             torch.stack([torch.stack([x2, y2], dim=1), 
+                                          torch.stack([x3, y3], dim=1), 
+                                          torch.stack([x4, y4], dim=1), 
+                                          torch.stack([x1, y1], dim=1)], dim=1),
+                             torch.stack([torch.stack([x3, y3], dim=1), 
+                                          torch.stack([x4, y4], dim=1), 
+                                          torch.stack([x1, y1], dim=1), 
+                                          torch.stack([x2, y2], dim=1)], dim=1),
+                             torch.stack([torch.stack([x4, y4], dim=1), 
+                                          torch.stack([x1, y1], dim=1), 
+                                          torch.stack([x2, y2], dim=1), 
+                                          torch.stack([x3, y3], dim=1)], dim=1)], dim=1)
+    dst_coordinate = torch.stack([torch.stack([xmin, ymin], dim=1), 
+                                  torch.stack([xmax, ymin], dim=1),
+                                  torch.stack([xmax, ymax], dim=1),
+                                  torch.stack([xmin, ymax], dim=1),], dim=1)
+    force_i = 100000000.0
+    force = torch.full((coordinate.size(0),), force_i, 
+               dtype=coordinate.dtype, 
+               device=coordinate.device)
+    force_flag = torch.zeros(coordinate.size(0),
+                             dtype=coordinate.dtype,
+                             device=coordinate.device)
+    combinate_final = dst_coordinate.clone()
+    for i in range(4):
+        temp_force = batch_cal_line_length(
+            combinate[:, i][:, 0], 
+            dst_coordinate[:, 0]) + batch_cal_line_length(
+                combinate[:, i][:, 1],
+                dst_coordinate[:, 1]) + batch_cal_line_length(
+                    combinate[:, i][:, 2], 
+                    dst_coordinate[:, 2]) + batch_cal_line_length(
+                        combinate[:, i][:, 3], 
+                        dst_coordinate[:, 3])
+                        
+        mask = temp_force < force
+        force[mask] = temp_force[mask]
+        force_flag[mask] = i
+        combinate_final[mask] = combinate[mask, i]
+        # if temp_force < force:
+        #     force = temp_force
+        #     force_flag = i
+#    if force_flag != 0:
+#        print("choose one direction!")
+    return  combinate_final
 
 def preprocess_annotation(target):
     polyes = []

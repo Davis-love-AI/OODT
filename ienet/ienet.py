@@ -4,10 +4,10 @@ import torch
 from torch import nn
 from detectron2.structures import ImageList
 from detectron2.utils.logger import log_first_n
-
+from detectron2.structures import Instances
 from detectron2.modeling import build_backbone
 
-from detectron2.modeling import detector_postprocess
+# from detectron2.modeling import detector_postprocess
 import numpy as np
 
 from .ienet_module import (
@@ -25,11 +25,43 @@ from detectron2.modeling.meta_arch.build import META_ARCH_REGISTRY
 __all__ = ["IENet"]
 
 
+
+def detector_postprocess(results, output_height, output_width, mask_threshold=0.5):
+    """
+    Resize the output instances.
+    The input images are often resized when entering an object detector.
+    As a result, we often need the outputs of the detector in a different
+    resolution from its inputs.
+
+    This function will resize the raw outputs of an R-CNN detector
+    to produce outputs according to the desired output resolution.
+
+    Args:
+        results (Instances): the raw outputs from the detector.
+            `results.image_size` contains the input image resolution the detector sees.
+            This object might be modified in-place.
+        output_height, output_width: the desired output resolution.
+
+    Returns:
+        Instances: the resized output from the model, based on the output resolution
+    """
+    scale_x, scale_y = (output_width / results.image_size[1], output_height / results.image_size[0])
+    results = Instances((output_height, output_width), **results.get_fields())
+
+
+    output_boxes = results.pred_boxes
+
+    output_boxes.scale(scale_x, scale_y)
+
+    results = results[output_boxes.nonempty()]
+
+
+
+    return results
+
 @META_ARCH_REGISTRY.register()
 class IENet(nn.Module):
-    """
-    Implement RetinaNet (https://arxiv.org/abs/1708.02002).
-    """
+
 
     def __init__(self, cfg):
         super().__init__()
@@ -77,11 +109,6 @@ class IENet(nn.Module):
         images = self.preprocess_image(batched_inputs)
         if "instances" in batched_inputs[0]:
             gt_instances = self.get_ground_truth(batched_inputs)
-        elif "targets" in batched_inputs[0]:
-            log_first_n(
-                logging.WARN, "'targets' in the model inputs is now renamed to 'instances'!", n=10
-            )
-            gt_instances = [x["targets"].to(self.device) for x in batched_inputs]
         else:
             gt_instances = None
 
@@ -118,19 +145,14 @@ class IENet(nn.Module):
             anno = target["instances"]
             target_dict = {}
             pt_inbox = anno.gt_pt_inbox_boxes.to(self.device)
-            
-            target_dict['pt_inbox'] = BoxMode.convert(
-                    pt_inbox.tensor.float(), BoxMode.XYXY_ABS, 
-                    BoxMode.XYWH_ABS
-                )
-            target_dict['pt_hbb'] = anno.gt_pt_hbb_boxes.tensor.float().to(self.device)
-            polygons = torch.from_numpy(
-                    np.array(anno.gt_masks.polygons)
-                ).squeeze(1).float()
-            target_dict['poly'] = polygons.to(self.device)
-            target_dict['area'] = anno.gt_masks.area().to(self.device)
+            target_dict['pt_inbox'] = pt_inbox.tensor
+            target_dict['pt_hbb'] = anno.gt_pt_hbb_boxes.tensor.to(self.device)
+            target_dict['poly'] = anno.gt_poly.to(self.device)
+            target_dict['area'] = anno.gt_areas.to(self.device)
             target_dict['labels'] = anno.gt_classes.to(self.device)
             target_dicts.append(target_dict)
+            
+                
 
         return target_dicts
     def _forward_test(self, locations, prediction, image_sizes):

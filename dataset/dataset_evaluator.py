@@ -17,7 +17,8 @@ from .point_tool import polygonToRotRectangle, hrbb2hw_obb
 
 import math
 import cv2 as cv
-
+from DOTA_devkit import polyiou
+from DOTA_devkit.dota_evaluation_task1 import voc_eval as dota_val
 from .dataset_tool import preprocess_annotation
 from .eval_tool import decode_result
 from detectron2.layers.rotated_boxes import pairwise_iou_rotated
@@ -45,11 +46,11 @@ class DotaVOCDetectionEvaluator(DatasetEvaluator):
         self._class_names = meta.thing_classes
         self._cpu_device = torch.device("cpu")
         self._logger = logging.getLogger(__name__)
+        
 
     def reset(self):
-        self._predictions_rot = defaultdict(list)
         self._predictions = defaultdict(list)  # class name -> list of prediction strings
-
+        self._predictions_om = defaultdict(list)
     def process(self, inputs, outputs):
         for input, output in zip(inputs, outputs):
             image_id = input["image_id"]
@@ -60,8 +61,10 @@ class DotaVOCDetectionEvaluator(DatasetEvaluator):
 #            boxes = instances.pred_boxes.tensor.numpy()
             scores = instances.scores.tolist()
             classes = instances.pred_classes.tolist()
-            results = decode_result(classes, image_id, scores, instances, self.eval_type)
-            self._predictions = results
+            decode_result(self._predictions, self._predictions_om, classes, 
+                          image_id, scores, instances, 
+                           self.eval_type)
+            
             
 
     def evaluate(self):
@@ -70,14 +73,20 @@ class DotaVOCDetectionEvaluator(DatasetEvaluator):
             dict: has a key "segm", whose value is a dict of "AP", "AP50", and "AP75".
         """
         all_predictions = comm.gather(self._predictions, dst=0)
+        all_predictions_om = comm.gather(self._predictions_om, dst=0)
         if not comm.is_main_process():
             return
         predictions = defaultdict(list)
+        predictions_om = defaultdict(list)
         
         for predictions_per_rank in all_predictions:
             for clsid, lines in predictions_per_rank.items():
                 predictions[clsid].extend(lines)
         del all_predictions
+        for predictions_per_rank in all_predictions_om:
+            for clsid, lines in predictions_per_rank.items():
+                predictions_om[clsid].extend(lines)
+        del all_predictions_om
 
         self._logger.info(
             "Evaluating {} using {} metric. "
@@ -86,17 +95,33 @@ class DotaVOCDetectionEvaluator(DatasetEvaluator):
             )
         )
         prefix="pascal_dota_eval_" + self.eval_type
-        with tempfile.TemporaryDirectory(prefix=prefix) as dirname:
-            res_file_template = os.path.join(dirname, "{}.txt")
-
+        
+        if self.eval_type == 'hw':
+            dirname = 'projects/Avod/output/' + prefix
+            
+            if not os.path.exists(dirname):
+                os.mkdir(dirname)
+                
+            res_file_template = os.path.join(dirname, "Task1_{}.txt")
+    
             aps = defaultdict(list)  # iou -> ap per class
             for cls_id, cls_name in enumerate(self._class_names):
                 lines = predictions.get(cls_id, [""])
-
+    
                 with open(res_file_template.format(cls_name), "w") as f:
                     f.write("\n".join(lines))
                     
-
+        with tempfile.TemporaryDirectory(prefix=prefix) as dirname:
+            res_file_template = os.path.join(dirname, "{}.txt")
+    
+            aps = defaultdict(list)  # iou -> ap per class
+            for cls_id, cls_name in enumerate(self._class_names):
+                lines = predictions.get(cls_id, [""])
+    
+                with open(res_file_template.format(cls_name), "w") as f:
+                    f.write("\n".join(lines))
+                    
+    
                 for thresh in range(50, 100, 5):
                     rec, prec, ap = voc_eval(
                         res_file_template,
@@ -108,10 +133,16 @@ class DotaVOCDetectionEvaluator(DatasetEvaluator):
                         eval_type=self.eval_type,
                     )
                     aps[thresh].append(ap * 100)
-
+                    
         ret = OrderedDict()
+        x = aps[50]
+        cls_ret = OrderedDict()
+        for clsid, ix in enumerate(x):
+            cls_ret[self._class_names[clsid]] = ix
+        
+        ret["Cls_50"] = cls_ret
         mAP = {iou: np.mean(x) for iou, x in aps.items()}
-        ret["bbox"] = {"AP": np.mean(list(mAP.values())), "AP50": mAP[50], "AP75": mAP[75]}
+        ret["bbox"] = {"AP    ": np.mean(list(mAP.values())), "AP50  ": mAP[50], "AP75  ": mAP[75]}
         return ret
 
 
@@ -135,13 +166,10 @@ def parse_rec(filename):
     objects = []
     for obj in tree.findall("object"):
         obj_struct = {}
-        obj_struct["name"] = obj.find("name").text
-        if obj_struct["name"] == "container-crane":
-            continue
-        obj_struct["difficult"] = 0
+        obj_struct["name"] = obj.find("name").text.lower().strip()
+
+        obj_struct["difficult"] = int(obj.find("difficult").text)
         bb = obj.find("bndbox")
-        
-        objects.append(obj_struct)
         
         OBB_box = [
             float(bb.find("center_x").text),
@@ -150,17 +178,35 @@ def parse_rec(filename):
             float(bb.find("box_height").text),
         ]
         
+        point_box = [
+                float(bb.find("x1").text),
+                float(bb.find("y1").text),
+                float(bb.find("x2").text),
+                float(bb.find("y2").text),
+                float(bb.find("x3").text),
+                float(bb.find("y3").text),
+                float(bb.find("x4").text),
+                float(bb.find("y4").text),
+            ]
+        
+        OBB_box = polygonToRotRectangle(point_box)
+        
         theta = float(bb.find("box_ang").text)
         
         theta = math.degrees(theta)
+        
+        rot_box = [OBB_box[0], OBB_box[1],
+                   OBB_box[2], OBB_box[3],
+                   -theta]
+          
         
         if theta > 90.0:
             theta -= 180
         elif theta < -90.0:
             theta += 180
             
-        if theta == -90.0:
-            theta = 90
+        if theta == 90.0:
+            theta = -90
         
         
         hbb_box = ((OBB_box[0], OBB_box[1]),
@@ -168,12 +214,16 @@ def parse_rec(filename):
                    theta)
         hbb_box = cv.boxPoints(hbb_box)
         hbb_box = np.int0(hbb_box)
+        pt_x_y_min = hbb_box.min(axis= 0)
+        pt_x_y_max = hbb_box.max(axis= 0)
+    
+        hrbb_box = np.hstack((pt_x_y_min, pt_x_y_max))
         
-        obj_struct["obbox"] = hbb_box
-        rot_box = [OBB_box[0], OBB_box[1],
-                   OBB_box[2], OBB_box[3],
-                   theta]
+        obj_struct["obbox"] = hbb_box.reshape(-1)
+        
         obj_struct["rotbox"] = rot_box
+        obj_struct["hrbb_box"] = hrbb_box
+        objects.append(obj_struct)
 
     return objects
 
@@ -248,12 +298,22 @@ def voc_eval(detpath, annopath, imagesetfile, classname, ovthresh=0.5, use_07_me
     # extract gt objects for this class
     class_recs = {}
     npos = 0
-    box_type = "obbox" if eval_type == 'hw' else "rotbox"
-    reshape_num = 8 if eval_type == 'hw' else 5
+    reshape_num = 4
+    box_type = "obbox"
+    if eval_type == 'hbb':
+        box_type = "hrbb_box"
+        reshape_num = 4
+    if eval_type == 'hw':
+        box_type = "obbox"
+        reshape_num = 8
+    else:
+        box_type = "rotbox"
+        reshape_num = 5
+        
     for imagename in imagenames:
         R = [obj for obj in recs[imagename] if obj["name"] == classname]
-        box_type
-        bbox = np.array([x[box_type] for x in R]).reshape(-1, reshape_num)
+
+        bbox = np.array([x[box_type] for x in R])
         difficult = np.array([x["difficult"] for x in R]).astype(np.bool)
         # difficult = np.array([False for x in R]).astype(np.bool)  # treat all "difficult" as GT
         det = [False] * len(R)
@@ -270,6 +330,7 @@ def voc_eval(detpath, annopath, imagesetfile, classname, ovthresh=0.5, use_07_me
     confidence = np.array([float(x[1]) for x in splitlines])
     
     BB = np.array([[float(z) for z in x[2:]] for x in splitlines]).reshape(-1, reshape_num)
+    
 
     # sort by confidence
     sorted_ind = np.argsort(-confidence)
@@ -280,26 +341,43 @@ def voc_eval(detpath, annopath, imagesetfile, classname, ovthresh=0.5, use_07_me
     nd = len(image_ids)
     tp = np.zeros(nd)
     fp = np.zeros(nd)
+
+    
     for d in range(nd):
         R = class_recs[image_ids[d]]
         bb = BB[d, :].astype(float)
         ovmax = -np.inf
         BBGT = R["bbox"].astype(float)
+        
 
         if BBGT.size > 0:
             # compute overlaps
             # intersection
-
-            # 1. calculate the overlaps between hbbs, if the iou between hbbs are 0, the iou between obbs are 0, too.
-            # pdb.set_trace()
-            if eval_type == 'rot':
-                bb = torch.from_numpy(bb).to(torch.device('cuda'))
-                BBGT = torch.from_numpy(BBGT).to(torch.device('cuda'))
-                overlaps = pairwise_iou_rotated(bb.float(), BBGT.float())[0]
-                overlaps = overlaps.cpu().numpy()
+            if eval_type == 'hbb': 
+                ixmin = np.maximum(BBGT[:, 0], bb[0])
+                iymin = np.maximum(BBGT[:, 1], bb[1])
+                ixmax = np.minimum(BBGT[:, 2], bb[2])
+                iymax = np.minimum(BBGT[:, 3], bb[3])
+                iw = np.maximum(ixmax - ixmin + 1.0, 0.0)
+                ih = np.maximum(iymax - iymin + 1.0, 0.0)
+                inters = iw * ih
+    
+                # union
+                uni = (
+                    (bb[2] - bb[0] + 1.0) * (bb[3] - bb[1] + 1.0)
+                    + (BBGT[:, 2] - BBGT[:, 0] + 1.0) * (BBGT[:, 3] - BBGT[:, 1] + 1.0)
+                    - inters
+                )
+    
+                overlaps = inters / uni
                 ovmax = np.max(overlaps)
                 jmax = np.argmax(overlaps)
             if eval_type == 'hw':
+                # compute overlaps
+                # intersection
+    
+                # 1. calculate the overlaps between hbbs, if the iou between hbbs are 0, the iou between obbs are 0, too.
+                # pdb.set_trace()
                 BBGT_xmin =  np.min(BBGT[:, 0::2], axis=1)
                 BBGT_ymin = np.min(BBGT[:, 1::2], axis=1)
                 BBGT_xmax = np.max(BBGT[:, 0::2], axis=1)
@@ -323,7 +401,7 @@ def voc_eval(detpath, annopath, imagesetfile, classname, ovthresh=0.5, use_07_me
                        (BBGT_ymax - BBGT_ymin + 1.) - inters)
     
                 overlaps = inters / uni
-                
+    
                 BBGT_keep_mask = overlaps > 0
                 BBGT_keep = BBGT[BBGT_keep_mask, :]
                 BBGT_keep_index = np.where(overlaps > 0)[0]
@@ -342,7 +420,14 @@ def voc_eval(detpath, annopath, imagesetfile, classname, ovthresh=0.5, use_07_me
                     jmax = np.argmax(overlaps)
                     # pdb.set_trace()
                     jmax = BBGT_keep_index[jmax]
-
+            else:
+                BBGT_gpu = torch.from_numpy(BBGT).view(-1, 5).float().cuda()
+                bb_gpu = torch.from_numpy(bb).view(-1, 5).float().cuda()
+                overlaps = pairwise_iou_rotated(BBGT_gpu, bb_gpu).cpu()
+                overlaps = overlaps.view(-1).numpy()
+                ovmax = np.max(overlaps)
+                jmax = np.argmax(overlaps)
+            
 
         if ovmax > ovthresh:
             if not R["difficult"][jmax]:

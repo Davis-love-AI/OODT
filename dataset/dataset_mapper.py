@@ -40,10 +40,6 @@ class DatasetMapper:
     def __init__(self, cfg, is_train=True):
         self.tfm_gens = utils.build_transform_gen(cfg, is_train)
 
-        if cfg.INPUT.CROP.ENABLED and is_train:
-            self.crop_gen = T.RandomCrop(cfg.INPUT.CROP.TYPE, cfg.INPUT.CROP.SIZE)
-        else:
-            self.crop_gen = None
 
         # fmt: off
         self.img_format     = cfg.INPUT.FORMAT
@@ -70,14 +66,7 @@ class DatasetMapper:
         image = read_image(dataset_dict["file_name"], format=self.img_format, rota=rota)
         utils.check_image_size(dataset_dict, image)
 
-        if "annotations" not in dataset_dict:
-            image, transforms = T.apply_transform_gens(
-                ([self.crop_gen] if self.crop_gen else []) + self.tfm_gens, image
-            )
-        else:
-            # Crop around an instance if there are instances in the image.
-            # USER: Remove if you don't use cropping
-            image, transforms = T.apply_transform_gens(self.tfm_gens, image)
+        # image, transforms = T.apply_transform_gens(self.tfm_gens, image)
  
 
         image_shape = image.shape[:2]  # h, w
@@ -97,16 +86,16 @@ class DatasetMapper:
             # USER: Implement additional transformations if you have other types of data
             annos = [
                 transform_dota_instance_annotations(
-                    obj, transforms, image_shape, rota
+                    obj, image_shape, rota
                 )
                 for obj in dataset_dict.pop("annotations")
             ]
+            
+            
             instances = dota_annotations_to_instances(
                 annos, image_shape
             )
-            # Create a tight bounding box from masks, useful when image is cropped
-            if self.crop_gen and instances.has("gt_masks"):
-                instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
+         
             dataset_dict["instances"] = filter_empty_instances(instances)
 
 

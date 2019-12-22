@@ -14,9 +14,9 @@ def add_ienet_config(cfg):
     _C.MODEL.AVOD.IN_FEATURES = ["p3", "p4", "p5", "p6", "p7"]
     _C.MODEL.AVOD.FPN_STRIDES = [8, 16, 32, 64, 128]
     _C.MODEL.AVOD.PRIOR_PROB = 0.01
-    _C.MODEL.AVOD.INFERENCE_TH = 0.05
-    _C.MODEL.AVOD.NMS_TH = 0.6
-    _C.MODEL.AVOD.PRE_NMS_TOP_N = 5000
+    _C.MODEL.AVOD.INFERENCE_TH = 0.3
+    _C.MODEL.AVOD.NMS_TH = 0.5
+    _C.MODEL.AVOD.PRE_NMS_TOP_N = 1000
     
     # Focal loss parameter: alpha
     _C.MODEL.AVOD.LOSS_ALPHA = 0.25
@@ -36,6 +36,7 @@ def add_ienet_config(cfg):
     
     _C.MODEL.AVOD.USE_DCN_IN_TOWER = False
     _C.MODEL.AVOD.INDEPENDENT_BRANCH = False
+    _C.MODEL.AVOD.ATTENTION_ON = False
     _C.MODEL.AVOD.HEAD_NAME = "avod"
     _C.MODEL.AVOD.ROTA_AUG_ON = True
     _C.MODEL.AVOD.IN_CHANNELS = 256

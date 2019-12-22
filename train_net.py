@@ -64,6 +64,8 @@ class Trainer(DefaultTrainer):
             evaluator_list.append(DotaVOCDetectionEvaluator(dataset_name, 'hw'))
         if 'rot' in evaluator_type:
             evaluator_list.append(DotaVOCDetectionEvaluator(dataset_name, 'rot'))
+        if 'hbb' in evaluator_type:
+            evaluator_list.append(DotaVOCDetectionEvaluator(dataset_name, 'hbb'))
         if len(evaluator_list) == 0:
             raise NotImplementedError(
                 "no Evaluator for the dataset {} with the type {}".format(
