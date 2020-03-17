@@ -15,7 +15,7 @@ DATALOADER:
   NUM_WORKERS: 8
 DATASETS:
   TRAIN: ("dota_train_800", "dota_val_800",)
-  TEST: ("dota_val_mini_800",)
+  TEST: ("dota_test_800_aug",)
 TEST:
   EVAL_PERIOD: 5000
 OUTPUT_DIR: "/home/omnisky/Pengming_workspace/disk_2T/DOTA/training/ienet/avod_center_demo_v3"

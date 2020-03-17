@@ -43,6 +43,7 @@ class AVODWH_WH_HEAD(torch.nn.Module):
         self.use_dcn_in_tower = cfg.MODEL.AVOD.USE_DCN_IN_TOWER
         self.pt_tower_define = cfg.MODEL.AVOD.INDEPENDENT_BRANCH
         self.attention_define = cfg.MODEL.AVOD.ATTENTION_ON
+        self.scale_to_wh = cfg.MODEL.AVOD.WH_SCALE_ON
 
         cls_tower = []
         bbox_tower = []
@@ -125,8 +126,13 @@ class AVODWH_WH_HEAD(torch.nn.Module):
         bias_value = -math.log((1 - prior_prob) / prior_prob)
         torch.nn.init.constant_(self.cls_logits.bias, bias_value)
 
-        self.scales_ltrb = nn.ModuleList([Scale(init_value=1.0) for _ in range(5)])
-        self.scales_wh = nn.ModuleList([Scale(init_value=1.0) for _ in range(5)])
+        num_level = len(self.fpn_strides)
+        self.scales_ltrb = nn.ModuleList(
+            [Scale(init_value=1.0) for _ in range(num_level)])
+        
+        if self.scale_to_wh:
+            self.scales_wh = nn.ModuleList(
+                [Scale(init_value=1.0) for _ in range(num_level)])
 
     def forward(self, x):
         logits = []
@@ -154,14 +160,15 @@ class AVODWH_WH_HEAD(torch.nn.Module):
             if self.pt_tower_define:
                 pt_tower = self.pt_tower(feature)
                 pt_tower = pt_tower + pt
-                bbox_pt = self.scales_wh[l](self.bbox_pt(pt_tower))
+                bbox_pt = self.bbox_pt(pt_tower)
             else:
                 if pt != 0:
-                    bbox_pt = self.scales_wh[l](self.bbox_pt(pt))
+                    bbox_pt = self.bbox_pt(pt)
                 else:
-                    bbox_pt = self.scales_wh[l](self.bbox_pt(box_tower))
+                    bbox_pt = self.bbox_pt(box_tower)
 
-
+            if self.scale_to_wh:
+                bbox_pt = self.scales_wh[l](bbox_pt)
             bbox_pred = self.scales_ltrb[l](self.bbox_pred(box_tower))
             if self.norm_reg_targets:
                 bbox_pred = F.relu(bbox_pred)

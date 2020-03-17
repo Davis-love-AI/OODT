@@ -1,0 +1,36 @@
+_BASE_: "Base-IENet-retina_p6p7.yaml"
+MODEL:
+  WEIGHTS: "catalog://ImageNetPretrained/FAIR/R-101-GN"
+  MASK_ON: False
+  RESNETS:
+    DEPTH: 101
+    NORM: "GN"
+  AVOD:
+    HEAD_NAME: "AVODWH_WH"
+    INDEPENDENT_BRANCH: True
+    LOSS_ALPHA: 0.3
+    # Focal loss parameter: gamma
+    LOSS_GAMMA: 3.0
+    WH_SCALE_ON: False
+    PT_WEIGHT: 0.2
+    BOX_WEIGHT: 0.2
+  FPN:
+    NORM: "GN"
+SOLVER:
+  IMS_PER_BATCH: 8
+  BASE_LR: 0.001
+  STEPS: (300000, 320000, 350000)
+  MAX_ITER: 400000
+DATALOADER:
+  NUM_WORKERS: 8
+INPUT:
+  MIN_SIZE_TRAIN: (800, )
+  MAX_SIZE_TRAIN: 800
+  MIN_SIZE_TEST: 800
+  MAX_SIZE_TEST: 800
+DATASETS:
+  TRAIN: ("dota_train_800_aug", "dota_val_800_aug",)
+  TEST: ("dota_test_800_aug",)
+TEST:
+  EVAL_PERIOD: 5000
+OUTPUT_DIR: "/home/omnisky/Pengming_workspace/disk_2T/DOTA/training/ienetv1/avod_wh_demo_v2"

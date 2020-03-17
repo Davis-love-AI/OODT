@@ -1,0 +1,42 @@
+_BASE_: "Base-IENet-retina_p6p7.yaml"
+MODEL:
+  MASK_ON: False
+  RESNETS:
+    OUT_FEATURES: ["res2", "res3", "res4", "res5"]
+    DEPTH: 101
+    NORM: "GN"
+  AVOD:
+    HEAD_NAME: "AVODWH_WH"
+    INDEPENDENT_BRANCH: True
+    LOSS_ALPHA: 0.3
+    # Focal loss parameter: gamma
+    LOSS_GAMMA: 3.0
+    WH_SCALE_ON: False
+    PT_WEIGHT: 0.2
+    BOX_WEIGHT: 0.2
+    FPN_STRIDES: [4, 8, 16, 32, 64, 128]
+    IN_FEATURES: ["p2", "p3", "p4", "p5", "p6", "p7"]
+    PRE_NMS_TOP_N: 2000
+    INFERENCE_TH: 0.1
+  FPN:
+    NORM: "GN"
+    IN_FEATURES: ["res2", "res3", "res4", "res5"]
+SOLVER:
+  IMS_PER_BATCH: 8
+  BASE_LR: 0.001
+  STEPS: (400000, 500000)
+  MAX_ITER: 550000
+DATALOADER:
+  NUM_WORKERS: 8
+DATASETS:
+  TRAIN: ("dota_train_700_aug","dota_val_700_aug")
+  TEST: ("dota_test_700_aug",)
+TEST:
+  EVAL_PERIOD: 0
+  DETECTIONS_PER_IMAGE: 1000
+INPUT:
+  MIN_SIZE_TRAIN: (700,)
+  MAX_SIZE_TRAIN: 700
+  MIN_SIZE_TEST: 700
+  MAX_SIZE_TEST: 700
+OUTPUT_DIR: "/home/omnisky/Pengming_workspace/disk_2T/DOTA/training/ienetv1/avod_wh_demo_v3"

@@ -149,7 +149,7 @@ def convRotaToPolyAndHbb(rotate):
     
     return hrbb_box, pt_inbox, polygons
 
-def transform_dota_instance_annotations(annotation, image_size, rota):
+def transform_dota_instance_annotations(annotation, image_size, rota, transforms):
     
     """
     Apply transforms to box, segmentation and keypoints of annotations of a single instance.
@@ -198,7 +198,7 @@ def transform_dota_instance_annotations(annotation, image_size, rota):
             OBB_box[2], OBB_box[3],
             theta
         ]
-    annotation["boxes"] = obb_box
+    annotation["boxes"] = transforms.apply_rotated_box(np.array([obb_box]))[0]
        
     return annotation
 
@@ -250,14 +250,14 @@ def dota_annotations_to_instances(annos, image_size):
     target.gt_classes = classes
 
 
-    masks = PolygonMasks(polygons)
+    # masks = PolygonMasks(polygons)
     masks_areas = target.gt_pt_hbb_boxes.area()
-    masks = torch.as_tensor(masks.polygons).to(dtype=torch.float)
-    target.gt_poly = masks.view(-1, 8)
+    # masks = torch.as_tensor(masks.polygons).to(dtype=torch.float)
+    # target.gt_poly = masks.view(-1, 8)
     target.gt_areas = masks_areas.to(dtype=torch.float)
     
-    if len(target) > 3000:
-        mask = random.sample(list(range(0, len(target))), 3000)
+    if len(target) > 1000:
+        mask = random.sample(list(range(0, len(target))), 1000)
         target = target[mask]
         
     return target

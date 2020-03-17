@@ -373,6 +373,7 @@ def voc_eval(detpath, annopath, imagesetfile, classname, ovthresh=0.5, use_07_me
                 ovmax = np.max(overlaps)
                 jmax = np.argmax(overlaps)
             if eval_type == 'hw':
+            # else:
                 # compute overlaps
                 # intersection
     

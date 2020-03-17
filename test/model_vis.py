@@ -50,16 +50,18 @@ import tqdm
 cfg = get_cfg()
 add_ienet_config(cfg)
 # file = 'projects/Avod/configs/ienet_R_50_FPN_s1x_test.yaml'
-file = 'projects/Avod/configs/ienet_R_101_FPN_demo_s1x.yaml'
+file = 'projects/Avod/configs/ienetv1_R_101_FPN_demo_v1_s1x.yaml'
 cfg.merge_from_file(file)
-model_w = "/home/omnisky/Pengming_workspace/disk_2T/DOTA/training/ienet/avod_center_demo/model_0119999.pth"
+model_w = "/home/omnisky/Pengming_workspace/disk_2T/DOTA/training/ienetv1/avod_wh_demo_v1/model_0234999.pth"
 cfg.MODEL.WEIGHTS = model_w
+cfg.MODEL.AVOD.INFERENCE_TH = 0.4
+cfg.MODEL.DEVICE = "cuda:6"
 
-# predictor = DefaultPredictor(cfg)
-size= "./"
+predictor = DefaultPredictor(cfg)
+size= "DOTA_800_200"
 root = cfg.MODEL.AVOD.DATASET
 register_all_dota_voc(root)
-split = "test"
+split = "val_mini"
 dir_root = os.path.join(root.format(size), split) 
 
 dataset_dicts = load_dota_instances(dir_root, split)
@@ -204,3 +206,7 @@ while True:
         break
    
 cv2.destroyAllWindows()
+
+import numpy as np
+para = sum([np.prod(list(p.size())) for p in predictor.model.parameters()])
+size = para * 4 / 1000/ 1000

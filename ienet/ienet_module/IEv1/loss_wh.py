@@ -81,6 +81,8 @@ class AVODWH_WH_LO(object):
         self.center_sampling_radius = cfg.MODEL.AVOD.CENTER_SAMPLING_RADIUS
         self.iou_loss_type = cfg.MODEL.AVOD.IOU_LOSS_TYPE
         self.norm_reg_targets = cfg.MODEL.AVOD.NORM_REG_TARGETS
+        self.box_weight = cfg.MODEL.AVOD.BOX_WEIGHT
+        self.pt_weight = cfg.MODEL.AVOD.PT_WEIGHT
 
         # we make use of IOU Loss for bounding boxes regression,
         # but we found that L1 in log scale can yield a similar performance
@@ -136,13 +138,38 @@ class AVODWH_WH_LO(object):
         return inside_gt_bbox_mask
 
     def prepare_targets(self, points, targets):
-        object_sizes_of_interest = [
-            [-1, 64],
-            [64, 128],
-            [128, 256],
-            [256, 512],
-            [512, INF],
-        ]
+        if self.fpn_strides[0] == 8:
+            object_sizes_of_interest = [
+                [-1, 64],
+                [64, 128],
+                [128, 256],
+                [256, 512],
+                [512, INF],
+            ]
+        else:
+            # object_sizes_of_interest = [
+            #     [-1, 98],
+            #     [98, 256],
+            #     [256, 384],
+            #     [384, 512],
+            #     [512, INF],
+            # ]
+            object_sizes_of_interest = [
+                [-1, 32],
+                [32, 64],
+                [64, 128],
+                [128, 256],
+                [256, 512],
+                [512, INF],
+            ]
+            # object_sizes_of_interest = [
+            #     [-1, 16],
+            #     [16, 32],
+            #     [32, 64],
+            #     [64, 128],
+            #     [128, 256],
+            #     [256, INF],
+            # ]
         expanded_object_sizes_of_interest = []
         for l, points_per_level in enumerate(points):
             object_sizes_of_interest_per_level = \
@@ -391,9 +418,9 @@ class AVODWH_WH_LO(object):
         losses = {
             "loss_cls": cls_loss,
             "loss_reg": reg_loss,
-            "loss_l1": reg_l1_loss * 0.1,
+            "loss_l1": reg_l1_loss * self.box_weight,
 #            "loss_inner_reg": inner_reg_loss,
-            "loss_pt_reg": pt_loss * 0.1,
+            "loss_pt_reg": pt_loss * self.pt_weight,
             "loss_centerness": centerness_loss,
             }
 

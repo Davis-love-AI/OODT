@@ -60,6 +60,10 @@ class Trainer(DefaultTrainer):
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         evaluator_list = []
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
+        if "dota_val_mini" in dataset_name:
+            evaluator_type = 'rot'
+        if "dota_test" in dataset_name:
+            evaluator_type = 'hw'
         if 'hw' in evaluator_type:
             evaluator_list.append(DotaVOCDetectionEvaluator(dataset_name, 'hw'))
         if 'rot' in evaluator_type:
